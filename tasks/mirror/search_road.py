@@ -9,6 +9,33 @@ from module.logger import log
 from module.my_error.my_error import InputAttributeError
 from tasks.base.retry import retry
 
+_ONNX_SESSION = None
+_ONNX_INPUT_NAME = None
+_LSD_DETECTOR = None
+
+
+def _get_onnx_session():
+    global _ONNX_INPUT_NAME, _ONNX_SESSION
+    if _ONNX_SESSION is None:
+        import onnxruntime as ort
+
+        _ONNX_SESSION = ort.InferenceSession("./assets/model/best.onnx")
+        _ONNX_INPUT_NAME = _ONNX_SESSION.get_inputs()[0].name
+    return _ONNX_SESSION, _ONNX_INPUT_NAME
+
+
+def _get_lsd_detector():
+    global _LSD_DETECTOR
+    if _LSD_DETECTOR is None:
+        _LSD_DETECTOR = cv2.createLineSegmentDetector(0)
+    return _LSD_DETECTOR
+
+
+def _take_color_screenshot():
+    while auto.take_screenshot(gray=False) is None:
+        continue
+    return auto.screenshot
+
 
 class MirrorMap:
     def __init__(self, floor=1, hard_mode=False):
@@ -274,7 +301,8 @@ def search_road_from_road_map(hard_mode=False):
                 break
 
     bus_pos = auto.find_element("mirror/mybus_default_distance.png")
-    all_nodes = identify_nodes(bus[0])
+    map_screenshot = _take_color_screenshot()
+    all_nodes = identify_nodes(bus[0], map_screenshot)
     y_area = divide_the_area_by_y(all_nodes)
     reset_position = False
     initial_bus_pos = Position.MID
@@ -286,7 +314,7 @@ def search_road_from_road_map(hard_mode=False):
             reset_position = "Top"
             initial_bus_pos = Position.TOP
     elif len(y_area) == 1:
-        all_road = divide_the_area_by_x(identify_road(bus[0]))
+        all_road = divide_the_area_by_x(identify_road(bus[0], screenshot=map_screenshot))
         if len(all_road) == 0:
             road = ["M"]
         else:
@@ -325,13 +353,15 @@ def search_road_from_road_map(hard_mode=False):
                 bus_position = auto.find_element("mirror/mybus_default_distance.png", take_screenshot=True)
                 if bus_position is None:
                     break
-        all_nodes = identify_nodes(bus[0])
+        bus_pos = bus
+        map_screenshot = _take_color_screenshot()
+        all_nodes = identify_nodes(bus[0], map_screenshot)
 
     if len(road) != 0:
         return road, ["unknown"]
 
     all_nodes_layer = divide_the_area_by_x(all_nodes)
-    all_road = divide_the_area_by_x(identify_road(bus[0]))
+    all_road = divide_the_area_by_x(identify_road(bus[0], screenshot=map_screenshot))
 
     route_graph = RouteGraph(all_nodes_layer, initial_bus_pos=initial_bus_pos, hard_mode=hard_mode)
     route_graph.init_road(all_road, bus[0], bus_pos[1])
@@ -355,9 +385,8 @@ def search_road_from_road_map(hard_mode=False):
 # shop 是商店，small_boss_battle 是异想体遭遇战
 
 
-def identify_nodes(bus_x):
+def identify_nodes(bus_x, screenshot=None):
     import numpy as np
-    import onnxruntime as ort
 
     # 定义检测目标的类别标签（与模型训练时的类别一致）
     CLASSES = [
@@ -372,12 +401,13 @@ def identify_nodes(bus_x):
 
     no_flag = False  # 标记是否检测到目标（初始为 False，未检测到时设为 True）
 
-    # 加载 ONNX 格式的目标检测模型
-    session = ort.InferenceSession("./assets/model/best.onnx")
+    # 加载 ONNX 格式的目标检测模型。Session 初始化很慢，因此复用模块级缓存。
+    session, input_name = _get_onnx_session()
 
     # 读取原始图像（BGR 格式，由 OpenCV 读取）
-    auto.take_screenshot(gray=False)
-    original_image: np.ndarray = np.array(auto.screenshot)
+    if screenshot is None:
+        screenshot = _take_color_screenshot()
+    original_image: np.ndarray = np.array(screenshot)
     [height, width, _] = original_image.shape  # 获取原始图像的高、宽、通道数
 
     # 创建正方形空白图像（边长为原始图像的最大边），用于保持图像比例并避免变形
@@ -397,7 +427,7 @@ def identify_nodes(bus_x):
     blob = cv2.dnn.blobFromImage(image, scalefactor=1 / 255, size=(640, 640), swapRB=True)
 
     # 执行模型推理（输入为 blob）
-    outputs = session.run(None, {session.get_inputs()[0].name: blob})  # 输出为模型预测结果
+    outputs = session.run(None, {input_name: blob})  # 输出为模型预测结果
 
     outputs = outputs[0]  # 提取第一个输出（YOLO 通常输出一个包含所有检测结果的数组）
     outputs = np.array([cv2.transpose(outputs[0])])  # 转置维度（适配后续处理逻辑）
@@ -483,7 +513,7 @@ def identify_nodes(bus_x):
     return node_list
 
 
-def identify_road(bus_x, min_length=160, merge_distance=230):
+def identify_road(bus_x, min_length=160, merge_distance=230, screenshot=None):
     """
     增强版LSD对角线检测，完整输出模块，显示方向标记和中心点
 
@@ -501,13 +531,18 @@ def identify_road(bus_x, min_length=160, merge_distance=230):
     # === 可靠检测阶段 ===
     def get_detected_lines(img):
         """获取检测到的所有线段"""
-        lsd = cv2.createLineSegmentDetector(0)
+        lsd = _get_lsd_detector()
         detected = lsd.detect(img)
         if detected and detected[0] is not None:
             return detected[0]
 
-    auto.take_screenshot()
-    screenshot = np.array(auto.screenshot)
+    if screenshot is None:
+        while auto.take_screenshot() is None:
+            continue
+        screenshot = auto.screenshot
+    if getattr(screenshot, "mode", None) != "L":
+        screenshot = screenshot.convert("L")
+    screenshot = np.array(screenshot)
     raw_lines = get_detected_lines(screenshot)  # 调用检测函数获取原始线段数据
     if raw_lines is None or len(raw_lines) == 0:  # 检测结果为空
         log.warning("⚠️ 未检测到任何线段")  # 提示无结果
