@@ -63,7 +63,8 @@ def select_battle_team(num):
         "home/back_assets.png", model="normal"
     ):
         auto.click_element("home/back_assets.png")
-    if position := auto.find_element("battle/teams_assets.png", take_screenshot=True):
+    if identify_position := auto.find_element("teams/identify_assets.png", take_screenshot=True):
+        position = [identify_position[0] - 2150 * scale, identify_position[1] + 215 * scale]
         auto.mouse_click(1, 1)
         my_position[0] += position[0]
         my_position[1] += position[1]
@@ -230,18 +231,16 @@ def load_team_code_in_game(team_code: str) -> bool:
         auto.click_element("teams/team_code_assets.png")
         sleep(1)
 
-
         # 查找并点击加载编队码按钮
-        auto.click_element("teams/load_team_code_button_assets.png",take_screenshot=True)
+        auto.click_element("teams/load_team_code_button_assets.png", take_screenshot=True)
         sleep(1)
 
         # 查找根据取消按钮判断输入框是否出现
-        if not auto.find_element("teams/team_code_cancel_button_assets.png",take_screenshot=True):
+        if not auto.find_element("teams/team_code_cancel_button_assets.png", take_screenshot=True):
             # 尝试点击取消按钮返回
             auto.mouse_click_blank()
             sleep(1)
             continue
-
 
         # 使用 input_text(text) 直接输入编队码
         auto.input_text(team_code)
@@ -249,18 +248,18 @@ def load_team_code_in_game(team_code: str) -> bool:
 
         # 点击确认按钮，最多重试 3 次
         for _ in range(3):
-            if auto.click_element("teams/team_code_confirm_button_assets.png",take_screenshot=True):
+            if auto.click_element("teams/team_code_confirm_button_assets.png", take_screenshot=True):
                 sleep(1)
             else:
                 break
 
         # 验证返回队伍选择界面
-        if auto.find_element("teams/team_code_assets.png",take_screenshot=True):
+        if auto.find_element("teams/team_code_assets.png", take_screenshot=True):
             return True
         else:
             auto.click_element("teams/team_code_cancel_button_assets.png")
             sleep(1)
-        
+
     auto.mouse_click(100, 100)  # 点击左上角关闭
     log.warning(f"加载编队码失败，已重试{max_retries}次: {team_code}")
     return False
