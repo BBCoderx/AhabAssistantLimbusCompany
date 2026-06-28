@@ -3,6 +3,16 @@ import socket
 import sys
 import threading
 
+# 尽早清除 SSLKEYLOGFILE，避免 OpenSSL 在建立 HTTPS 连接时因跨 CRT 边界崩溃。
+# 该变量通常由调试代理（如 Fiddler/Charles/Wireshark）设置，Python 内嵌的 OpenSSL
+# 在 Windows 上不提供 OPENSSL_Applink 符号，一试写文件就会抛错退出。
+# 此处仅清除当前进程的环境变量，不影响系统设置和其他进程。
+_ORIG_SSLKEYLOGFILE = os.environ.pop("SSLKEYLOGFILE", None)
+
+# 将当前工作目录设置为程序所在的目录，确保无论从哪里执行，其工作目录都正确设置为程序本身的位置，避免路径错误。
+os.chdir(
+    os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+)
 # 解决 Windows DPI 缩放问题
 from ctypes import c_void_p, windll
 
@@ -22,17 +32,19 @@ except (AttributeError, OSError):
         except Exception:
             pass
 
-from app.language_manager import LanguageManager
-from app.my_app import MainWindow
-from module.config import cfg
+# 先配好日志（给 "AALC" logger 挂 handler），再 import 会在 import 期就打日志的 app/config 模块，
+# 否则那些启动日志会丢。
+from module.logger import log
+from module.logger.my_log import Logger
 
-# 将当前工作目录设置为程序所在的目录，确保无论从哪里执行，其工作目录都正确设置为程序本身的位置，避免路径错误。
-os.chdir(
-    os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-)
+Logger()
 
 # 获取管理员权限
 import pyuac
+
+from app.language_manager import LanguageManager
+from app.my_app import MainWindow
+from module.config import cfg
 
 if not pyuac.isUserAdmin():
     try:
@@ -82,6 +94,10 @@ def send_args_to_existing_instance(port, args):
 
 
 if __name__ == "__main__":
+    if _ORIG_SSLKEYLOGFILE is not None:
+        log.warning(f"检测到冲突的环境变量 SSLKEYLOGFILE={_ORIG_SSLKEYLOGFILE}，"
+                     f"已在进程内清除，避免 OpenSSL 崩溃")
+
     # 定义一个唯一的端口号（建议选择 1024-65535 之间的随机数）
     APP_PORT = 62333
 

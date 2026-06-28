@@ -17,7 +17,7 @@ jobs:
 
       # 配置 uv 
       - name: Setup UV for Python
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -40,3 +40,4 @@ jobs:
           name: AALC_${{ inputs.version }}
           path: |
             dist/AALC_${{ inputs.version }}.7z
+          archive: false

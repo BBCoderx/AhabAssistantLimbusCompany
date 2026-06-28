@@ -201,7 +201,17 @@ class Automation(metaclass=SingletonMeta):
         """
         if find_type == "image_with_multiple_targets" and len(coordinates) > 0:
             for c in coordinates:
-                self.mouse_action_with_pos(c, offset, action, times, dx, dy, find_type="image", interval=1)
+                self.mouse_action_with_pos(
+                    c,
+                    offset=offset,
+                    action=action,
+                    times=times,
+                    drag_time=drag_time,
+                    dx=dx,
+                    dy=dy,
+                    find_type="image",
+                    interval=1,
+                )
             return True
 
         if cfg.mouse_action_interval and interval == 0.5:
@@ -603,7 +613,7 @@ class Automation(metaclass=SingletonMeta):
         path_changed = False
         if dark_matched and not default_matched:
             path_manager.set_theme("dark", log_stacklevel=additional_stack + 4)
-        elif default_matched and not dark_matched:
+        elif default_matched and dark_results and not dark_matched:
             path_manager.set_theme("default", log_stacklevel=additional_stack + 4)
             path_changed = path_manager.eliminate_dark_paths() or path_changed
         elif dark_matched and default_matched:
@@ -682,8 +692,12 @@ class Automation(metaclass=SingletonMeta):
                     continue
                 center, matchVal = ImageUtils.match_template(screenshot, template, bbox, model)
                 matched = self._is_valid_match(matchVal, threshold)
+                if 0.70 < matchVal < 0.90 and int(matchVal * 1000 + 1e-9) % 10 >= 5:
+                    match_fmt = ".3f"
+                else:
+                    match_fmt = ".2f"
                 log.debug(
-                    f"目标图片：{target.replace('./assets/images/', '')}, 路径: {loaded_path}, 相似度：{matchVal:.2f}, 目标位置：{center}",
+                    f"目标图片：{target.replace('./assets/images/', '')}, 路径: {loaded_path}, 相似度：{matchVal:{match_fmt}}, 目标位置：{center}",
                     stacklevel=additional_stack + 3,
                 )
                 results.append(

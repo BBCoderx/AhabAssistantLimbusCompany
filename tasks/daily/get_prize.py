@@ -1,6 +1,9 @@
+from time import sleep
+
 from module.automation import auto
 from module.decorator.decorator import begin_and_finish_time_log
 from module.logger import log
+from tasks.base import update_model_for_retry
 from tasks.base.retry import retry
 from utils.image_utils import ImageUtils
 
@@ -35,11 +38,7 @@ def get_pass_prize():
 
         auto.mouse_to_blank()
         loop_count -= 1
-
-        if loop_count < 10:
-            auto.model = "normal"
-        if loop_count < 5:
-            auto.model = "aggressive"
+        update_model_for_retry(loop_count, normal_at=10, aggressive_at=5)
         if loop_count < 0:
             log.error("无法收取日常/周常")
             return
@@ -57,10 +56,7 @@ def get_pass_prize():
                 retry()
             break
         loop_count -= 1
-        if loop_count < 10:
-            auto.model = "normal"
-        if loop_count < 5:
-            auto.model = "aggressive"
+        update_model_for_retry(loop_count, normal_at=10, aggressive_at=5)
         if loop_count < 0:
             log.error("无法收取日常/周常")
             break
@@ -74,20 +70,22 @@ def get_mail_prize():
         # 自动截图
         if auto.take_screenshot() is None:
             continue
+        if retry() is False:
+            return False
         if auto.click_element("mail/get_mail_prize_confirm.png"):
             auto.click_element("mail/close_assets.png")
             break
         if auto.click_element("mail/claim_all_assets.png"):
+            sleep(3)
+            if retry():
+                continue
             auto.click_element("mail/close_assets.png")
             break
         if auto.click_element("home/mail_assets.png"):
             continue
         auto.mouse_to_blank()
         loop_count -= 1
-        if loop_count < 20:
-            auto.model = "normal"
-        if loop_count < 10:
-            auto.model = "aggressive"
+        update_model_for_retry(loop_count, normal_at=20, aggressive_at=10)
         if loop_count < 0:
             log.error("无法收取邮箱")
             break

@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import PurePosixPath
 
 import psutil
 
@@ -12,6 +13,8 @@ class Updater:
 
     def __init__(self, file_name=None):
         self.process_names = ["AALC.exe"]
+        self.updater_name = "AALC Updater.exe"
+        self.apply_updater_name = "AALC Updater.apply.exe"
 
         self.temp_path = os.path.abspath("./update_temp")
         os.makedirs(self.temp_path, exist_ok=True)
@@ -24,8 +27,12 @@ class Updater:
         self.delete_folder_path = os.path.abspath("./assets/images")
         self.changes_file_path = os.path.abspath("./update_temp/changes.json")
 
-        self.download_file_path = os.path.join(self.temp_path, self.file_name)
-        self.extract_folder_path = os.path.join(self.temp_path, self.file_name.rsplit(".", 1)[0])
+        if self.file_name is None:
+            self.download_file_path = None
+            self.extract_folder_path = self.temp_path
+        else:
+            self.download_file_path = os.path.join(self.temp_path, self.file_name)
+            self.extract_folder_path = os.path.join(self.temp_path, self.file_name.rsplit(".", 1)[0])
 
     def extract_file(self):
         """解压下载的文件。"""
@@ -57,8 +64,9 @@ class Updater:
             self._apply_incremental_update()
         else:
             try:
-                if os.path.exists(self.delete_folder_path):
-                    shutil.rmtree(self.delete_folder_path)
+                shutil.rmtree(self.delete_folder_path)
+            except FileNotFoundError:
+                print("待删除目录不存在，跳过")
             except Exception as e:
                 print(f"删除旧资源文件失败: {e}")
             print("开始覆盖安装...")
@@ -79,39 +87,119 @@ class Updater:
         print("检测到增量更新清单，执行增量更新...")
 
         for dir_path in changes.get("deleted_dir", []):
-            full_path = os.path.join(self.cover_folder_path, dir_path)
-            if os.path.exists(full_path):
+            normalized_path = self._normalize_manifest_path(dir_path)
+            if not normalized_path:
+                continue
+            full_path = os.path.join(self.cover_folder_path, normalized_path)
+            try:
                 shutil.rmtree(full_path)
                 print(f"删除目录: {dir_path}")
+            except FileNotFoundError:
+                print(f"删除目录不存在: {dir_path}")
 
         for file_path in changes.get("deleted", []):
-            full_path = os.path.join(self.cover_folder_path, file_path)
-            if os.path.exists(full_path):
+            normalized_path = self._normalize_manifest_path(file_path)
+            if not normalized_path:
+                continue
+            full_path = os.path.join(self.cover_folder_path, normalized_path)
+            try:
                 os.remove(full_path)
                 print(f"删除文件: {file_path}")
+            except FileNotFoundError:
+                print(f"删除文件不存在: {file_path}")
 
         for dir_path in changes.get("added_dir", []):
-            full_path = os.path.join(self.cover_folder_path, dir_path)
+            normalized_path = self._normalize_manifest_path(dir_path)
+            if not normalized_path:
+                continue
+            full_path = os.path.join(self.cover_folder_path, normalized_path)
             os.makedirs(full_path, exist_ok=True)
             print(f"创建目录: {dir_path}")
 
         for file_path in changes.get("added", []):
-            src = os.path.join(self.extract_folder_path, file_path)
-            dst = os.path.join(self.cover_folder_path, file_path)
-            if os.path.exists(src):
+            normalized_path = self._normalize_manifest_path(file_path)
+            if not normalized_path:
+                continue
+            src = os.path.join(self.extract_folder_path, normalized_path)
+            dst = os.path.join(self.cover_folder_path, normalized_path)
+            try:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
                 print(f"新增文件: {file_path}")
+            except FileNotFoundError:
+                print(f"源文件不存在: {file_path}")
 
         for file_path in changes.get("modified", []):
-            src = os.path.join(self.extract_folder_path, file_path)
-            dst = os.path.join(self.cover_folder_path, file_path)
-            if os.path.exists(src):
+            normalized_path = self._normalize_manifest_path(file_path)
+            if not normalized_path:
+                continue
+            src = os.path.join(self.extract_folder_path, normalized_path)
+            dst = os.path.join(self.cover_folder_path, normalized_path)
+            try:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
                 print(f"更新文件: {file_path}")
+            except FileNotFoundError:
+                print(f"源文件不存在: {file_path}")
 
         print("增量更新完成")
+
+    def _normalize_manifest_path(self, relative_path):
+        """兼容带归档根目录前缀与普通相对路径的增量清单。"""
+        parts = [part for part in PurePosixPath(relative_path.replace("\\", "/")).parts if part not in ("", ".")]
+        if not parts:
+            return None
+
+        archive_root_name = os.path.basename(os.path.normpath(self.extract_folder_path))
+        if parts[0] == archive_root_name:
+            parts = parts[1:]
+
+        if not parts:
+            return None
+
+        return os.path.join(*parts)
+
+    def _get_extracted_updater_path(self):
+        return os.path.join(self.extract_folder_path, self.updater_name)
+
+    def _get_staged_updater_path(self):
+        return os.path.join(self.temp_path, self.apply_updater_name)
+
+    def _prepare_update_payload(self, apply_mode):
+        if apply_mode and os.path.isdir(self.extract_folder_path):
+            print("检测到已解压的更新包，使用新更新器继续更新...")
+            return
+
+        while True:
+            if self.extract_file():
+                return
+
+    def _handoff_to_new_updater(self, current_executable=None):
+        if not self.file_name:
+            return False
+
+        extracted_updater_path = self._get_extracted_updater_path()
+        if not os.path.exists(extracted_updater_path):
+            return False
+
+        current_executable_path = os.path.abspath(current_executable or sys.argv[0])
+        staged_updater_path = self._get_staged_updater_path()
+
+        try:
+            if os.path.abspath(extracted_updater_path) == current_executable_path:
+                return False
+
+            shutil.copy2(extracted_updater_path, staged_updater_path)
+            subprocess.Popen(
+                [staged_updater_path, "--apply-update", self.file_name],
+                creationflags=subprocess.DETACHED_PROCESS,
+                cwd=self.cover_folder_path,
+            )
+            print("已切换到新版本更新器继续更新...")
+            return True
+        except Exception as e:
+            print(f"切换到新版本更新器失败，将继续使用当前更新器: {e}")
+            return False
 
     def terminate_processes(self):
         """终止相关进程以准备更新。"""
@@ -134,20 +222,38 @@ class Updater:
     def cleanup(self):
         """清理下载和解压的临时文件。"""
         print("开始清理...")
-        try:
-            os.remove(self.download_file_path)
-            shutil.rmtree(self.extract_folder_path)
-            if os.path.exists(self.changes_file_path):
-                os.remove(self.changes_file_path)
-            print("清理完成")
-        except Exception as e:
-            print(f"清理失败: {e}")
+        self._cleanup_file(self.download_file_path, "下载文件")
+        self._cleanup_tree(self.extract_folder_path, "提取目录")
+        self._cleanup_file(self.changes_file_path, "变更清单文件")
+        print("清理完成")
 
-    def run(self):
+    @staticmethod
+    def _cleanup_file(path, label):
+        if not path:
+            return
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            print(f"{label}不存在，跳过")
+        except Exception as e:
+            print(f"清理{label}失败: {e}")
+
+    @staticmethod
+    def _cleanup_tree(path, label):
+        if not path:
+            return
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            print(f"{label}不存在，跳过")
+        except Exception as e:
+            print(f"清理{label}失败: {e}")
+
+    def run(self, apply_mode=False):
         """运行更新流程。"""
-        while True:
-            if self.extract_file():
-                break
+        self._prepare_update_payload(apply_mode)
+        if not apply_mode and self._handoff_to_new_updater():
+            return
         self.terminate_processes()
         self.cover_folder()
         self.cleanup()
@@ -175,10 +281,14 @@ def check_temp_dir_and_run():
         subprocess.Popen(args, creationflags=subprocess.DETACHED_PROCESS)
         sys.exit(0)
 
-    file_name = sys.argv[1] if len(sys.argv) == 2 else None
+    apply_mode = len(sys.argv) >= 3 and sys.argv[1] == "--apply-update"
+    if apply_mode:
+        file_name = sys.argv[2]
+    else:
+        file_name = sys.argv[1] if len(sys.argv) == 2 else None
 
     updater = Updater(file_name)
-    updater.run()
+    updater.run(apply_mode=apply_mode)
 
 
 if __name__ == "__main__":

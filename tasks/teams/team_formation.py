@@ -8,13 +8,15 @@ from module.logger import log
 
 # 清队
 def clean_team():
+    scale = cfg.set_win_size / 1440
     while True:
         # 自动截图
         if auto.take_screenshot() is None:
             continue
         if auto.click_element("teams/clear_selection_confirm_assets.png"):
             break
-        if auto.click_element("teams/clear_selection_assets.png"):
+        if (identify_position := auto.find_element("teams/identify_assets.png")) and auto.mouse_action_with_pos(
+            [identify_position[0], identify_position[1] + 600 * scale]):
             sleep(0.5)
             auto.take_screenshot()
             if auto.find_element("teams/clear_selection_confirm_assets.png") is None:
@@ -79,7 +81,7 @@ def select_battle_team(num):
                 auto.mouse_drag(
                     first_position[0],
                     first_position[1] + 375 * scale,
-                    dy=-385 * scale,
+                    dy=-375 * scale,
                     drag_time=1.5,
                 )
                 sleep(1)

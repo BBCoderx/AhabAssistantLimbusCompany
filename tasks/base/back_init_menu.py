@@ -1,10 +1,10 @@
 from time import sleep
 
 from module.automation import auto
-from module.config import cfg
 from module.decorator.decorator import begin_and_finish_time_log
 from module.logger import log
-from tasks.base.retry import retry
+from tasks.base import update_model_for_retry
+from tasks.base.retry import click_title_screen_safely, ensure_simulator_game_started, retry
 from tasks.mirror.reward_card import get_reward_card
 
 
@@ -14,10 +14,7 @@ def back_init_menu(*, allow_restart: bool = True):
     auto.model = "clam"
     while True:
         loop_count -= 1
-        if loop_count < 20:
-            auto.model = "normal"
-        if loop_count < 10:
-            auto.model = "aggressive"
+        update_model_for_retry(loop_count, normal_at=20, aggressive_at=10)
         if loop_count < 0:
             if not allow_restart:
                 log.warning("无法返回主界面，本次调用禁用内部重启，返回失败")
@@ -31,27 +28,9 @@ def back_init_menu(*, allow_restart: bool = True):
             auto.model = "clam"
             sleep(1)
             continue
-        if cfg.simulator:
-            if cfg.simulator_type == 0:
-                from module.automation.input_handlers.simulator.mumu_control import (
-                    MumuControl,
-                )
-
-                if MumuControl.connection_device.check_game_alive() is False:
-                    MumuControl.connection_device.start_game()
-            else:
-                from module.automation.input_handlers.simulator.simulator_control import (
-                    SimulatorControl,
-                )
-
-                if SimulatorControl.connection_device.check_game_alive() is False:
-                    SimulatorControl.connection_device.start_game()
-        # 自动截图
-        if auto.take_screenshot() is None:
-            sleep(0.2)
+        if ensure_simulator_game_started():
             continue
-
-        if retry(skip_screenshot=True) is False:
+        if retry() is False:
             return False
 
         if auto.click_element("home/window_assets.png") and auto.find_element("home/mail_assets.png", model="normal"):
@@ -127,8 +106,7 @@ def back_init_menu(*, allow_restart: bool = True):
         if auto.find_element("base/clear_all_caches_assets.png", model="clam"):
             if auto.click_element("base/update_confirm_assets.png"):
                 continue
-            auto.mouse_click_blank()
-            sleep(5)
+            click_title_screen_safely()
             continue
 
         if auto.click_element("base/only_option_assets.png", model="clam"):
